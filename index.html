@@ -1,0 +1,1515 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Painel Financeiro</title>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/prop-types/prop-types.min.js"></script>
+<script crossorigin src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+<script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body style="margin:0">
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo, useCallback } = React;
+const { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } = Recharts;
+
+/* ---------- COLE AQUI O LINK DO SEU APPS SCRIPT (etapa 3) ---------- */
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwL52Vw41C-gs_dtaXRdhRkvH_zSEQPE3gJujRBvHvI8UQydYBNEV8QO0yTjfhkvNsm/exec";
+
+/* ---------- constantes ---------- */
+const CATEGORIAS_BASE = [
+  "Contas (Água/Luz/Internet/Streaming)",
+  "Carro",
+  "Manutenção Casa",
+  "Vestuário",
+  "Mercado",
+  "Alimentação Fora",
+  "Fast Food",
+  "Saúde",
+  "Espiritual",
+  "Lazer",
+  "Outros",
+];
+const PESSOAS = ["Messo", "Nan", "Lele", "Mel", "Família"];
+const PIX_PESSOAS = ["Messo", "Nan", "Lele", "Mel"];
+const TITULARES = ["Família", "Messo", "Nan", "Lele", "Mel", "Empresa"];
+const CARTOES_CONTAS = ["PL", "Nu PF", "Nu PJ", "Inter", "C6"];
+// nomes de fatura que "devolvem" limite ao cartão do dia a dia quando pagas
+const FATURA_PARA_CARTAO = { Inter: "Inter", C6: "C6", "Nu PF": "Nubank" };
+const ORIGENS_RECEBIMENTO = ["Salário/Serviço", "Venda", "Extra", "Outro"];
+
+const fmt = (n) =>
+  (Number(n) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+const todayISO = () => new Date().toISOString().slice(0, 10);
+const addDaysISO = (iso, days) => {
+  const d = new Date(iso + "T00:00:00");
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+};
+const statusEfetivo = (bill) => (bill.status === "pago" ? "pago" : bill.vencimento < todayISO() ? "atrasado" : "pendente");
+
+/* ---------- seed data ---------- */
+const SEED_BILLS = [
+  { id: "drf5rm3pmrscswwo", nome: "Multa trânsito Zé", categoria: "Carro", valor: 130.16, vencimento: "2026-06-15", status: "pendente", recorrente: false, cartao: null, contaId: null },
+  { id: "n6nw7xy3mrscswwo", nome: "Aluguel", categoria: "Casa", valor: 2500, vencimento: "2026-06-20", status: "pendente", recorrente: true, cartao: null, contaId: null, obs: "Valor com multa por atraso (em dia seria 2200)" },
+  { id: "iaq4c046mrscswwo", nome: "Conta Luz Casa", categoria: "Contas (Água/Luz/Internet/Streaming)", valor: 393, vencimento: "2026-06-24", status: "pendente", recorrente: false, cartao: null, contaId: null },
+  { id: "u8pnla27mrscswwo", nome: "Conta Água Casa", categoria: "Contas (Água/Luz/Internet/Streaming)", valor: 187, vencimento: "2026-06-25", status: "pendente", recorrente: false, cartao: null, contaId: null },
+  { id: "wtxstju5mrscswwo", nome: "Conta Água Casa", categoria: "Contas (Água/Luz/Internet/Streaming)", valor: 146, vencimento: "2026-06-25", status: "pendente", recorrente: false, cartao: null, contaId: null, obs: "Duas contas venceram na mesma data" },
+  { id: "mq456qelmrscswwo", nome: "Vivo Internet Casa", categoria: "Contas (Água/Luz/Internet/Streaming)", valor: 285, vencimento: "2026-07-06", status: "pendente", recorrente: true, cartao: null, contaId: null },
+  { id: "cpta0h2amrscswwo", nome: "Vivo Internet Casinha", categoria: "Contas (Água/Luz/Internet/Streaming)", valor: 200, vencimento: "2026-07-06", status: "pendente", recorrente: true, cartao: null, contaId: null },
+
+  { id: "jzvpd17hmrscswwo", nome: "Aluguel", categoria: "Casa", valor: 2500, vencimento: "2026-07-20", status: "pendente", recorrente: true, cartao: null, contaId: null, obs: "Boleto só sai após quitar o atrasado" },
+  { id: "f0bpcvlkmrscswwo", nome: "Conta Luz Casinha", categoria: "Contas (Água/Luz/Internet/Streaming)", valor: 300, vencimento: "2026-07-23", status: "pendente", recorrente: false, cartao: null, contaId: null, obs: "Para quitar atrasadas" },
+  { id: "djr59mz5mrscswwo", nome: "Cartão PL", categoria: "Cartão", valor: 89, vencimento: "2026-07-22", status: "pendente", recorrente: true, cartao: "PL", contaId: null },
+  { id: "qszmhrt4mrscswwo", nome: "Cartão Nu PF", categoria: "Cartão", valor: 1300, vencimento: "2026-07-23", status: "pendente", recorrente: true, cartao: "Nu PF", contaId: null },
+  { id: "dndp7qdmmrscswwo", nome: "Cartão Nu PJ", categoria: "Cartão", valor: 1200, vencimento: "2026-07-23", status: "pendente", recorrente: true, cartao: "Nu PJ", contaId: null },
+  { id: "axzieyhrmrscswwo", nome: "Parcela Fiorino", categoria: "Carro", valor: 2300, vencimento: "2026-07-24", status: "pendente", recorrente: true, cartao: null, contaId: null },
+  { id: "a6vhy7immrscswwo", nome: "Conta Luz Casa", categoria: "Contas (Água/Luz/Internet/Streaming)", valor: 402, vencimento: "2026-07-28", status: "pendente", recorrente: true, cartao: null, contaId: null },
+  { id: "bdxcgty0mrscswwo", nome: "Terapia Lê", categoria: "Saúde", valor: 500, vencimento: "2026-07-28", status: "pendente", recorrente: true, cartao: null, contaId: null },
+  { id: "kwk1xysbmrscswwo", nome: "Terapia Nan", categoria: "Saúde", valor: 290, vencimento: "2026-07-31", status: "pendente", recorrente: true, cartao: null, contaId: null },
+
+  { id: "vsxg06vgmrscswwo", nome: "Cartão Inter", categoria: "Cartão", valor: 3100, vencimento: "2026-08-01", status: "pendente", recorrente: true, cartao: "Inter", contaId: null },
+  { id: "yknmnh6xmrscswwo", nome: "Cartão C6", categoria: "Cartão", valor: 190, vencimento: "2026-08-03", status: "pendente", recorrente: true, cartao: "C6", contaId: null },
+  { id: "h8swbw69mrscswwo", nome: "Conta Nubank", categoria: "Cartão", valor: 1500, vencimento: "2026-08-23", status: "pendente", recorrente: true, cartao: "Nu PF", contaId: null },
+  { id: "vmymxusemrscswwo", nome: "Vivo Internet Casa", categoria: "Contas (Água/Luz/Internet/Streaming)", valor: 288, vencimento: "2026-08-06", status: "pendente", recorrente: true, cartao: null, contaId: null },
+  { id: "ptsycuyfmrscswwo", nome: "Aluguel", categoria: "Casa", valor: 2200, vencimento: "2026-08-20", status: "pendente", recorrente: true, cartao: null, contaId: null, obs: "Valor em dia (sem multa)" },
+  { id: "22bbhx5zmrscswwo", nome: "Parcela Fiorino", categoria: "Carro", valor: 2300, vencimento: "2026-08-24", status: "pendente", recorrente: true, cartao: null, contaId: null },
+  { id: "7ailu4iomrscswwo", nome: "Conta Água Casa", categoria: "Contas (Água/Luz/Internet/Streaming)", valor: 153, vencimento: "2026-08-25", status: "pendente", recorrente: true, cartao: null, contaId: null },
+  { id: "53318m5qmrscswwo", nome: "Conta Luz Casa", categoria: "Contas (Água/Luz/Internet/Streaming)", valor: 400, vencimento: "2026-08-24", status: "pendente", recorrente: true, cartao: null, contaId: null },
+  { id: "m290vy3zmrscswwo", nome: "Conta Luz Casinha", categoria: "Contas (Água/Luz/Internet/Streaming)", valor: 65, vencimento: "2026-08-24", status: "pendente", recorrente: true, cartao: null, contaId: null },
+  { id: "vm7a0eltmrscswwo", nome: "Terapia Lê", categoria: "Saúde", valor: 500, vencimento: "2026-08-28", status: "pendente", recorrente: true, cartao: null, contaId: null },
+  { id: "wda28qbvmrscswwo", nome: "Terapia Nan", categoria: "Saúde", valor: 290, vencimento: "2026-08-15", status: "pendente", recorrente: true, cartao: null, contaId: null },
+  { id: "60wkafupmrscswwo", nome: "Terapia Nan", categoria: "Saúde", valor: 290, vencimento: "2026-08-30", status: "pendente", recorrente: true, cartao: null, contaId: null },
+];
+
+const SEED_DEBTS = [
+  { id: "b9gw7ia2mrscswwo", grupo: "Pessoal", nome: "Documento Fiorino", valor: 5000, obs: "Urgente", quitado: false },
+  { id: "tc6967b1mrscswwo", grupo: "Pessoal", nome: "Cartão MP Nan", valor: 4000, obs: "", quitado: false },
+  { id: "qbvikzjimrscswwo", grupo: "Pessoal", nome: "Cartão Neon", valor: 180, obs: "Para quitar", quitado: false },
+  { id: "tgze0infmrscswwo", grupo: "Pessoal", nome: "Zippy", valor: 1400, obs: "", quitado: false },
+  { id: "cmoc946pmrscswwo", grupo: "Pessoal", nome: "PicPay", valor: 5500, obs: "Para quitar", quitado: false },
+  { id: "5ns6llvrmrscswwo", grupo: "Pessoal", nome: "Empréstimo MP Nan", valor: 4000, obs: "", quitado: false },
+  { id: "tzxz42ofmrscswwo", grupo: "Pessoal", nome: "Helenice", valor: 1200, obs: "Escolar", quitado: false },
+  { id: "mjrenb2mmrscswwo", grupo: "Pessoal", nome: "Escola 2024", valor: 3800, obs: "", quitado: false },
+  { id: "byfasf5vmrscswwo", grupo: "Pessoal", nome: "Escola 2025", valor: 15000, obs: "", quitado: false },
+  { id: "feekpikemrscswwo", grupo: "Rogue/PJ", nome: "Empréstimo MP Rogue", valor: 1450, obs: "", quitado: false },
+  { id: "ux9wa70emrscswwo", grupo: "Rogue/PJ", nome: "Itaú", valor: 800, obs: "Para quitar", quitado: false },
+  { id: "ek3nuwg4mrscswwo", grupo: "Rogue/PJ", nome: "Sicoob", valor: 33000, obs: "A verificar", quitado: false },
+  { id: "tn2xvblhmrscswwo", grupo: "Rogue/PJ", nome: "Wander", valor: 16000, obs: "Pessoal", quitado: false },
+  { id: "rr4lc9kfmrscswwo", grupo: "Rogue/PJ", nome: "Merces", valor: 25000, obs: "Pessoal", quitado: false },
+  { id: "1ys8hkkhmrscswwo", grupo: "Rogue/PJ", nome: "Contador", valor: 4000, obs: "", quitado: false },
+  { id: "o1n67nsamrscswwo", grupo: "Rogue/PJ", nome: "Fornecedores e Factorings", valor: 100000, obs: "", quitado: false },
+];
+
+const SEED_CARDS = [
+  { id: "c6", nome: "C6", limite: 0, disponivel: 30 },
+  { id: "inter", nome: "Inter", limite: 0, disponivel: 0 },
+  { id: "nubank", nome: "Nubank", limite: 0, disponivel: 0 },
+];
+
+const SEED_ACCOUNTS = [
+  { id: "santander", nome: "Santander", tipo: "PF", titular: "Nan", saldo: 0 },
+  { id: "c6pf", nome: "C6", tipo: "PF", titular: "Família", saldo: 0 },
+  { id: "sicoobpf", nome: "Sicoob", tipo: "PF", titular: "Nan", saldo: 0 },
+  { id: "bb", nome: "Banco do Brasil (EG)", tipo: "PJ", titular: "Empresa", saldo: 0 },
+  { id: "sicoobpj", nome: "Sicoob (Rogue)", tipo: "PJ", titular: "Empresa", saldo: 0 },
+  { id: "mel", nome: "Conta Mel", tipo: "Mesada", titular: "Mel", saldo: 0 },
+  { id: "lele", nome: "Conta Lele", tipo: "Mesada", titular: "Lele", saldo: 0 },
+];
+
+const SEED_CONFIG = {
+  goals: {
+    "Contas (Água/Luz/Internet/Streaming)": 250,
+    Carro: 300,
+    "Manutenção Casa": 200,
+    Vestuário: 500,
+    Mercado: 2000,
+    "Alimentação Fora": 300,
+    "Fast Food": 500,
+    Saúde: 500,
+    Espiritual: 200,
+    Lazer: 200,
+    Outros: 200,
+  },
+  customCategories: [],
+  cards: SEED_CARDS,
+  accounts: SEED_ACCOUNTS,
+  adjustments: [],
+  transfers: [],
+};
+
+const SEED_INCOMES = [
+  { id: "f2hj4m2lmrscswwo", pessoa: "Messo", descricao: "A receber até fim do mês", origem: "Serviço", valor: 6000, recebido: false, data: "2026-07-31" },
+  { id: "36gvhnkcmrscswwo", pessoa: "Emerson", descricao: "Recebido", origem: "Serviço", valor: 8000, recebido: true, data: "2026-07-19" },
+];
+
+/* ---------- storage helpers (Google Sheets via Apps Script) ---------- */
+async function loadKey(key, fallback) {
+  try {
+    const res = await fetch(APPS_SCRIPT_URL + "?key=" + encodeURIComponent(key));
+    const data = await res.json();
+    if (data && data.value) return JSON.parse(data.value);
+  } catch (e) {
+    console.error("Erro ao carregar", key, e);
+  }
+  return fallback;
+}
+async function saveKey(key, value) {
+  try {
+    await fetch(APPS_SCRIPT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action: "set", key, value: JSON.stringify(value) }),
+    });
+  } catch (e) {
+    console.error("Erro ao salvar", key, e);
+  }
+}
+async function savePhotoRemote(id, dataUrl) {
+  try {
+    await fetch(APPS_SCRIPT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action: "uploadPhoto", id, dataUrl }),
+    });
+  } catch (e) {
+    console.error("Erro ao salvar foto", e);
+  }
+}
+async function deletePhotoRemote(id) {
+  try {
+    await fetch(APPS_SCRIPT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action: "deletePhoto", id }),
+    });
+  } catch (e) {
+    console.error("Erro ao apagar foto", e);
+  }
+}
+
+/* ---------- UI atoms ---------- */
+function StatusPill({ status, labels }) {
+  const defaultLabels = { atrasado: "Atrasado", pendente: "A vencer", pago: "Pago" };
+  const map = {
+    atrasado: { bg: "rgba(217,97,79,0.18)", fg: "#E88779" },
+    pendente: { bg: "rgba(217,164,65,0.18)", fg: "#E3B463" },
+    pago: { bg: "rgba(79,174,124,0.18)", fg: "#6FC898" },
+  };
+  const s = map[status] || map.pendente;
+  const label = (labels || defaultLabels)[status] || status;
+  return (
+    <span style={{ background: s.bg, color: s.fg, padding: "3px 10px", borderRadius: 20, fontSize: 11, fontFamily: "var(--mono)", letterSpacing: 0.5, textTransform: "uppercase", whiteSpace: "nowrap" }}>
+      {label}
+    </span>
+  );
+}
+
+function LedgerRow({ label, value, tone }) {
+  const toneColor = tone === "danger" ? "var(--red)" : tone === "warn" ? "var(--gold)" : tone === "good" ? "var(--green)" : "var(--text)";
+  return (
+    <div className="ledger-row">
+      <span className="ledger-label">{label}</span>
+      <span className="ledger-dots" />
+      <span className="ledger-value" style={{ color: toneColor }}>{fmt(value)}</span>
+    </div>
+  );
+}
+
+function AjusteForm({ onApply, placeholder }) {
+  const [open, setOpen] = useState(false);
+  const [delta, setDelta] = useState("");
+  const [motivo, setMotivo] = useState("");
+  if (!open)
+    return (
+      <button className="link-btn" onClick={() => setOpen(true)}>
+        + ajuste
+      </button>
+    );
+  return (
+    <div className="ajuste-form">
+      <input type="number" step="0.01" placeholder="+/- valor" value={delta} onChange={(e) => setDelta(e.target.value)} />
+      <input placeholder={placeholder || "Motivo (ex: gasto esquecido)"} value={motivo} onChange={(e) => setMotivo(e.target.value)} />
+      <button
+        className="btn-primary btn-sm"
+        onClick={() => {
+          if (!delta) return;
+          onApply(Number(delta), motivo);
+          setDelta("");
+          setMotivo("");
+          setOpen(false);
+        }}
+      >
+        Aplicar
+      </button>
+      <button className="btn-ghost btn-sm" onClick={() => setOpen(false)}>
+        Cancelar
+      </button>
+    </div>
+  );
+}
+
+/* ---------- App ---------- */
+function App() {
+  const [loaded, setLoaded] = useState(false);
+  const [tab, setTab] = useState("dashboard");
+  const [bills, setBills] = useState([]);
+  const [receipts, setReceipts] = useState([]);
+  const [debts, setDebts] = useState([]);
+  const [config, setConfig] = useState(SEED_CONFIG);
+  const [incomes, setIncomes] = useState([]);
+  const [month, setMonth] = useState("2026-07");
+  const [photoCache, setPhotoCache] = useState({});
+
+  useEffect(() => {
+    (async () => {
+      const [b, r, d, c, inc] = await Promise.all([
+        loadKey("bills-v1", null),
+        loadKey("receipts-v1", null),
+        loadKey("debts-v1", null),
+        loadKey("config-v1", null),
+        loadKey("incomes-v1", null),
+      ]);
+      let finalBills = b || SEED_BILLS;
+      finalBills = finalBills.map((bl) => ({
+        contaId: null,
+        ...bl,
+        categoria: bl.nome && bl.nome.startsWith("Terapia") && bl.categoria === "Outros" ? "Saúde" : bl.categoria,
+      }));
+      const finalReceipts = r || [];
+      const finalDebts = d || SEED_DEBTS;
+      let rawConfig = c || SEED_CONFIG;
+
+      // migração de contas: config antigo tinha "balances" como dicionário {id: valor}
+      let finalAccounts;
+      if (rawConfig.accounts && rawConfig.accounts.length) {
+        finalAccounts = rawConfig.accounts;
+      } else if (rawConfig.balances) {
+        finalAccounts = SEED_ACCOUNTS.map((a) => ({ ...a, saldo: Number(rawConfig.balances[a.id] ?? a.saldo ?? 0) }));
+      } else {
+        finalAccounts = SEED_ACCOUNTS;
+      }
+      // garante que Mel e Lele sempre existam, mesmo em painéis já usados antes dessa versão
+      ["mel", "lele"].forEach((accId) => {
+        if (!finalAccounts.find((a) => a.id === accId)) {
+          finalAccounts = [...finalAccounts, SEED_ACCOUNTS.find((a) => a.id === accId)];
+        }
+      });
+
+      const finalConfig = {
+        goals: { ...SEED_CONFIG.goals, ...(rawConfig.goals || {}) },
+        customCategories: rawConfig.customCategories || [],
+        cards: rawConfig.cards && rawConfig.cards.length ? rawConfig.cards : SEED_CARDS,
+        accounts: finalAccounts,
+        adjustments: rawConfig.adjustments || [],
+        transfers: rawConfig.transfers || [],
+      };
+      const finalIncomes = inc || SEED_INCOMES;
+
+      setBills(finalBills);
+      setReceipts(finalReceipts);
+      setDebts(finalDebts);
+      setConfig(finalConfig);
+      setIncomes(finalIncomes);
+      saveKey("bills-v1", finalBills);
+      saveKey("config-v1", finalConfig);
+      if (!r) saveKey("receipts-v1", finalReceipts);
+      if (!d) saveKey("debts-v1", finalDebts);
+      if (!inc) saveKey("incomes-v1", finalIncomes);
+      setLoaded(true);
+    })();
+  }, []);
+
+  const persistBills = useCallback((next) => {
+    setBills(next);
+    saveKey("bills-v1", next);
+  }, []);
+  const persistReceipts = useCallback((next) => {
+    setReceipts(next);
+    saveKey("receipts-v1", next);
+  }, []);
+  const persistDebts = useCallback((next) => {
+    setDebts(next);
+    saveKey("debts-v1", next);
+  }, []);
+  const persistConfig = useCallback((next) => {
+    setConfig(next);
+    saveKey("config-v1", next);
+  }, []);
+  const persistIncomes = useCallback((next) => {
+    setIncomes(next);
+    saveKey("incomes-v1", next);
+  }, []);
+
+  const allCategorias = useMemo(() => [...CATEGORIAS_BASE, ...config.customCategories], [config.customCategories]);
+
+  /* ---------- computed ---------- */
+  const totals = useMemo(() => {
+    let atrasado = 0, aVencer = 0, pagoNoMes = 0;
+    bills.forEach((b) => {
+      const st = statusEfetivo(b);
+      if (st === "atrasado") atrasado += b.valor;
+      else if (st === "pendente" && b.vencimento.slice(0, 7) === month) aVencer += b.valor;
+      else if (st === "pago" && b.vencimento.slice(0, 7) === month) pagoNoMes += b.valor;
+    });
+    const gastosRua = receipts.filter((r) => r.data.slice(0, 7) === month).reduce((s, r) => s + Number(r.valor), 0);
+    const saldoContas = config.accounts.reduce((s, a) => s + Number(a.saldo || 0), 0);
+    const recebido = incomes.filter((i) => i.recebido && i.data.slice(0, 7) === month).reduce((s, i) => s + Number(i.valor), 0);
+    const aReceber = incomes.filter((i) => !i.recebido && i.data.slice(0, 7) === month).reduce((s, i) => s + Number(i.valor), 0);
+    return { atrasado, aVencer, pagoNoMes, gastosRua, saldoContas, recebido, aReceber };
+  }, [bills, receipts, month, config, incomes]);
+
+  const categoryUsage = useMemo(() => {
+    const usage = {};
+    allCategorias.forEach((c) => (usage[c] = 0));
+    receipts.filter((r) => r.data.slice(0, 7) === month).forEach((r) => {
+      if (usage[r.categoria] !== undefined) usage[r.categoria] += Number(r.valor);
+    });
+    return usage;
+  }, [receipts, month, allCategorias]);
+
+  const proximos = useMemo(() => {
+    const mk = (dias) => {
+      const fim = addDaysISO(todayISO(), dias);
+      const bs = bills
+        .filter((b) => statusEfetivo(b) !== "pago" && b.vencimento >= todayISO() && b.vencimento <= fim)
+        .map((b) => ({ tipo: "pagar", nome: b.nome, valor: b.valor, data: b.vencimento }));
+      const is = incomes
+        .filter((i) => !i.recebido && i.data >= todayISO() && i.data <= fim)
+        .map((i) => ({ tipo: "receber", nome: i.pessoa + " — " + (i.descricao || i.origem || ""), valor: i.valor, data: i.data }));
+      const lista = [...bs, ...is].sort((a, b) => a.data.localeCompare(b.data));
+      const totalPagar = bs.reduce((s, x) => s + x.valor, 0);
+      const totalReceber = is.reduce((s, x) => s + x.valor, 0);
+      return { lista, totalPagar, totalReceber };
+    };
+    return { d7: mk(7), d15: mk(15) };
+  }, [bills, incomes]);
+
+  /* ---------- ações: cartões ---------- */
+  const ajustarCartao = (cardId, delta) => {
+    persistConfig({ ...config, cards: config.cards.map((c) => (c.id === cardId ? { ...c, disponivel: Number(c.disponivel || 0) + delta } : c)) });
+  };
+  const restaurarLimitePorFatura = (nomeCartaoFatura, valor) => {
+    const alvo = FATURA_PARA_CARTAO[nomeCartaoFatura];
+    if (!alvo) return;
+    const card = config.cards.find((c) => c.nome === alvo);
+    if (!card) return;
+    ajustarCartao(card.id, valor);
+  };
+
+  /* ---------- ações: contas bancárias ---------- */
+  const ajustarConta = (contaId, delta) => {
+    persistConfig({ ...config, accounts: config.accounts.map((a) => (a.id === contaId ? { ...a, saldo: Number(a.saldo || 0) + delta } : a)) });
+  };
+
+  /* ---------- ações: contas a pagar ---------- */
+  const toggleBillStatus = (id) => {
+    const bill = bills.find((b) => b.id === id);
+    if (!bill) return;
+    const estavaPago = bill.status === "pago";
+    persistBills(bills.map((b) => (b.id === id ? { ...b, status: estavaPago ? "pendente" : "pago" } : b)));
+    if (bill.cartao) restaurarLimitePorFatura(bill.cartao, estavaPago ? -bill.valor : bill.valor);
+    if (bill.contaId) ajustarConta(bill.contaId, estavaPago ? bill.valor : -bill.valor);
+  };
+  const deleteBill = (id) => persistBills(bills.filter((b) => b.id !== id));
+  const addBill = (bill) => persistBills([...bills, { id: uid(), status: "pendente", ...bill }]);
+  const duplicateNextMonth = (bill) => {
+    const [y, m, d] = bill.vencimento.split("-").map(Number);
+    const nm = m === 12 ? 1 : m + 1;
+    const ny = m === 12 ? y + 1 : y;
+    const novaData = `${ny}-${String(nm).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    addBill({ ...bill, id: undefined, vencimento: novaData, status: "pendente" });
+  };
+
+  /* ---------- ações: comprovantes ---------- */
+  const addReceipt = async (receipt, file) => {
+    const id = uid();
+    let hasPhoto = false;
+    if (file) {
+      try {
+        const dataUrl = await new Promise((res, rej) => {
+          const fr = new FileReader();
+          fr.onload = () => res(fr.result);
+          fr.onerror = rej;
+          fr.readAsDataURL(file);
+        });
+        await savePhotoRemote(id, dataUrl);
+        hasPhoto = true;
+      } catch (e) {
+        console.error("Erro ao salvar foto", e);
+      }
+    }
+    persistReceipts([...receipts, { id, hasPhoto, ...receipt }]);
+    if (receipt.pagamento.tipo === "cartao") {
+      const card = config.cards.find((c) => c.nome === receipt.pagamento.cartao);
+      if (card) ajustarCartao(card.id, -Number(receipt.valor));
+    } else if (receipt.pagamento.tipo === "pix" && receipt.pagamento.contaId) {
+      ajustarConta(receipt.pagamento.contaId, -Number(receipt.valor));
+    }
+  };
+  const deleteReceipt = (id) => {
+    const r = receipts.find((x) => x.id === id);
+    persistReceipts(receipts.filter((x) => x.id !== id));
+    deletePhotoRemote(id).catch(() => {});
+    if (r && r.pagamento.tipo === "cartao") {
+      const card = config.cards.find((c) => c.nome === r.pagamento.cartao);
+      if (card) ajustarCartao(card.id, Number(r.valor));
+    } else if (r && r.pagamento.tipo === "pix" && r.pagamento.contaId) {
+      ajustarConta(r.pagamento.contaId, Number(r.valor));
+    }
+  };
+  const loadPhoto = async (id) => {
+    if (photoCache[id]) return photoCache[id];
+    try {
+      const r = await loadKey(`photo:${id}`, null);
+      if (r && r.url) {
+        setPhotoCache((c) => ({ ...c, [id]: r.url }));
+        return r.url;
+      }
+    } catch (e) {}
+    return null;
+  };
+
+  const toggleDebt = (id) => persistDebts(debts.map((d) => (d.id === id ? { ...d, quitado: !d.quitado } : d)));
+  const toggleIncome = (id) => persistIncomes(incomes.map((i) => (i.id === id ? { ...i, recebido: !i.recebido } : i)));
+
+  const exportarDados = () => {
+    const payload = { bills, receipts, debts, config, incomes, exportadoEm: new Date().toISOString() };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `painel-financeiro-backup-${todayISO()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  if (!loaded) {
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#14171C", color: "#9AA0AA", fontFamily: "system-ui" }}>
+        Carregando painel…
+      </div>
+    );
+  }
+
+  return (
+    <div className="app">
+      <GlobalStyle />
+      <header className="header">
+        <div className="header-top">
+          <h1>Painel Financeiro</h1>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button className="btn-ghost btn-sm" onClick={exportarDados} title="Baixa um arquivo com todos os dados atuais">
+              ⬇ Exportar dados
+            </button>
+            <select className="month-select" value={month} onChange={(e) => setMonth(e.target.value)}>
+              {["2026-06", "2026-07", "2026-08", "2026-09", "2026-10", "2026-11"].map((m) => (
+                <option key={m} value={m}>
+                  {new Date(m + "-02").toLocaleDateString("pt-BR", { month: "long", year: "numeric" })}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="ledger-tape">
+          <LedgerRow label="Atrasado (hoje)" value={totals.atrasado} tone="danger" />
+          <LedgerRow label="A vencer no mês" value={totals.aVencer} tone="warn" />
+          <LedgerRow label="Pago no mês" value={totals.pagoNoMes} tone="good" />
+          <LedgerRow label="Gasto na rua (mês)" value={totals.gastosRua} />
+          <LedgerRow label="Saldo em contas" value={totals.saldoContas} tone="good" />
+          <LedgerRow label="A receber no mês" value={totals.aReceber} tone="warn" />
+        </div>
+      </header>
+
+      <nav className="tabs">
+        {[
+          ["dashboard", "Painel geral"],
+          ["contas", "Contas a pagar"],
+          ["comprovantes", "Comprovantes"],
+          ["metas", "Metas & limites"],
+          ["extrato", "Extrato"],
+          ["dividas", "Dívidas"],
+        ].map(([k, label]) => (
+          <button key={k} className={"tab" + (tab === k ? " tab-active" : "")} onClick={() => setTab(k)}>
+            {label}
+          </button>
+        ))}
+      </nav>
+
+      <main className="content">
+        {tab === "dashboard" && <DashboardTab totals={totals} categoryUsage={categoryUsage} proximos={proximos} month={month} />}
+        {tab === "contas" && (
+          <ContasTab bills={bills} month={month} categorias={allCategorias} accounts={config.accounts} onToggle={toggleBillStatus} onDelete={deleteBill} onAdd={addBill} onDuplicate={duplicateNextMonth} />
+        )}
+        {tab === "comprovantes" && (
+          <ComprovantesTab receipts={receipts} month={month} categorias={allCategorias} cards={config.cards} accounts={config.accounts} onAdd={addReceipt} onDelete={deleteReceipt} loadPhoto={loadPhoto} photoCache={photoCache} />
+        )}
+        {tab === "metas" && <MetasTab config={config} onSave={persistConfig} categoryUsage={categoryUsage} allCategorias={allCategorias} />}
+        {tab === "extrato" && (
+          <ExtratoTab
+            bills={bills}
+            receipts={receipts}
+            incomes={incomes}
+            accounts={config.accounts}
+            adjustments={config.adjustments}
+            transfers={config.transfers}
+            month={month}
+            onToggleIncome={toggleIncome}
+            onAddIncome={(inc) => persistIncomes([...incomes, { id: uid(), ...inc }])}
+            onDeleteIncome={(id) => persistIncomes(incomes.filter((i) => i.id !== id))}
+          />
+        )}
+        {tab === "dividas" && <DividasTab debts={debts} onToggle={toggleDebt} />}
+      </main>
+    </div>
+  );
+}
+
+/* ---------- Dashboard Tab ---------- */
+function DashboardTab({ totals, categoryUsage, proximos, month }) {
+  const [janela, setJanela] = useState("d7");
+  const geral = [
+    { name: "Pago no mês", valor: totals.pagoNoMes + totals.gastosRua, cor: "#D9614F" },
+    { name: "Recebido", valor: totals.recebido, cor: "#4FAE7C" },
+    { name: "A receber", valor: totals.aReceber, cor: "#D9A441" },
+  ];
+  const porCategoria = Object.entries(categoryUsage)
+    .filter(([, v]) => v > 0)
+    .map(([name, valor]) => ({ name, valor }))
+    .sort((a, b) => b.valor - a.valor);
+
+  const janelaAtiva = proximos[janela];
+
+  return (
+    <div>
+      <section className="group">
+        <div className="group-title">Gastos e recebimentos — {month.split("-").reverse().join("/")}</div>
+        <div className="chart-box">
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={geral} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#2E333C" vertical={false} />
+              <XAxis dataKey="name" tick={{ fill: "#9AA0AA", fontSize: 12 }} axisLine={{ stroke: "#2E333C" }} tickLine={false} />
+              <YAxis tick={{ fill: "#9AA0AA", fontSize: 11 }} axisLine={false} tickLine={false} width={40} />
+              <Tooltip contentStyle={{ background: "#232830", border: "1px solid #2E333C", borderRadius: 8, color: "#EDEAE3" }} formatter={(v) => fmt(v)} />
+              <Bar dataKey="valor" radius={[6, 6, 0, 0]}>
+                {geral.map((g, i) => (
+                  <Cell key={i} fill={g.cor} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </section>
+
+      {porCategoria.length > 0 && (
+        <section className="group">
+          <div className="group-title">Gastos na rua por categoria</div>
+          <div className="chart-box">
+            <ResponsiveContainer width="100%" height={Math.max(120, porCategoria.length * 34)}>
+              <BarChart data={porCategoria} layout="vertical" margin={{ top: 4, right: 20, left: 8, bottom: 4 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#2E333C" horizontal={false} />
+                <XAxis type="number" tick={{ fill: "#9AA0AA", fontSize: 11 }} axisLine={{ stroke: "#2E333C" }} tickLine={false} />
+                <YAxis type="category" dataKey="name" tick={{ fill: "#EDEAE3", fontSize: 12 }} axisLine={false} tickLine={false} width={170} />
+                <Tooltip contentStyle={{ background: "#232830", border: "1px solid #2E333C", borderRadius: 8, color: "#EDEAE3" }} formatter={(v) => fmt(v)} />
+                <Bar dataKey="valor" radius={[0, 6, 6, 0]} fill="#D9A441" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </section>
+      )}
+
+      <section className="group">
+        <div className="group-title">
+          Previsão dos próximos dias
+          <span className="window-toggle">
+            <button className={"toggle-btn toggle-sm" + (janela === "d7" ? " toggle-active" : "")} onClick={() => setJanela("d7")}>
+              7 dias
+            </button>
+            <button className={"toggle-btn toggle-sm" + (janela === "d15" ? " toggle-active" : "")} onClick={() => setJanela("d15")}>
+              15 dias
+            </button>
+          </span>
+        </div>
+        <div className="forecast-summary">
+          <span style={{ color: "var(--red)" }}>A pagar: {fmt(janelaAtiva.totalPagar)}</span>
+          <span style={{ color: "var(--green)" }}>A receber: {fmt(janelaAtiva.totalReceber)}</span>
+          <span style={{ color: janelaAtiva.totalReceber - janelaAtiva.totalPagar >= 0 ? "var(--green)" : "var(--red)" }}>
+            Saldo previsto: {fmt(janelaAtiva.totalReceber - janelaAtiva.totalPagar)}
+          </span>
+        </div>
+        {janelaAtiva.lista.length === 0 && <p className="empty">Nada previsto nesse período.</p>}
+        {janelaAtiva.lista.map((item, idx) => (
+          <div key={idx} className="bill-row">
+            <div className="bill-info">
+              <div className="bill-name">{item.nome}</div>
+              <div className="bill-meta">{item.data.split("-").reverse().join("/")}</div>
+            </div>
+            <div className="bill-value" style={{ color: item.tipo === "pagar" ? "var(--red)" : "var(--green)" }}>
+              {item.tipo === "pagar" ? "-" : "+"} {fmt(item.valor)}
+            </div>
+          </div>
+        ))}
+      </section>
+    </div>
+  );
+}
+
+/* ---------- Contas Tab ---------- */
+function ContasTab({ bills, month, categorias, accounts, onToggle, onDelete, onAdd, onDuplicate }) {
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ nome: "", categoria: categorias[0], valor: "", vencimento: month + "-05", cartao: "", contaId: "" });
+
+  const atrasadas = bills.filter((b) => statusEfetivo(b) === "atrasado").sort((a, b) => a.vencimento.localeCompare(b.vencimento));
+  const doMes = bills.filter((b) => statusEfetivo(b) !== "atrasado" && b.vencimento.slice(0, 7) === month).sort((a, b) => a.vencimento.localeCompare(b.vencimento));
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (!form.nome || !form.valor) return;
+    onAdd({ nome: form.nome, categoria: form.categoria, valor: Number(form.valor), vencimento: form.vencimento, cartao: form.cartao || null, contaId: form.contaId || null, recorrente: false });
+    setForm({ nome: "", categoria: categorias[0], valor: "", vencimento: month + "-05", cartao: "", contaId: "" });
+    setShowForm(false);
+  };
+
+  const nomeConta = (id) => accounts.find((a) => a.id === id)?.nome;
+
+  const Group = ({ title, items, tone }) => (
+    <section className="group">
+      <div className="group-title" style={{ color: tone }}>
+        {title} <span className="group-count">({items.length})</span>
+      </div>
+      {items.length === 0 && <p className="empty">Nada por aqui.</p>}
+      {items.map((b) => (
+        <div key={b.id} className={"bill-row" + (b.status === "pago" ? " bill-paid" : "")}>
+          <input type="checkbox" checked={b.status === "pago"} onChange={() => onToggle(b.id)} className="checkbox" />
+          <div className="bill-info">
+            <div className="bill-name">
+              {b.nome} {b.cartao && <span className="chip">{b.cartao}</span>} {b.contaId && <span className="chip">{nomeConta(b.contaId)}</span>}
+            </div>
+            <div className="bill-meta">
+              {b.categoria} · vence {b.vencimento.split("-").reverse().join("/")}
+              {b.obs && <span className="bill-obs"> — {b.obs}</span>}
+            </div>
+          </div>
+          <div className="bill-value">{fmt(b.valor)}</div>
+          <StatusPill status={statusEfetivo(b)} />
+          <div className="bill-actions">
+            {b.recorrente && (
+              <button className="icon-btn" title="Duplicar para o próximo mês" onClick={() => onDuplicate(b)}>
+                ⟳
+              </button>
+            )}
+            <button className="icon-btn" title="Excluir" onClick={() => onDelete(b.id)}>
+              ✕
+            </button>
+          </div>
+        </div>
+      ))}
+    </section>
+  );
+
+  return (
+    <div>
+      <Group title="Atrasadas" items={atrasadas} tone="var(--red)" />
+      <Group title="A vencer / pagas no mês selecionado" items={doMes} tone="var(--gold)" />
+
+      {!showForm ? (
+        <button className="btn-outline" onClick={() => setShowForm(true)}>
+          + Nova conta
+        </button>
+      ) : (
+        <form className="form-card" onSubmit={submit}>
+          <input placeholder="Nome da conta" value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} required />
+          <select value={form.categoria} onChange={(e) => setForm({ ...form, categoria: e.target.value })}>
+            {categorias.map((c) => (
+              <option key={c}>{c}</option>
+            ))}
+          </select>
+          <input type="number" step="0.01" placeholder="Valor" value={form.valor} onChange={(e) => setForm({ ...form, valor: e.target.value })} required />
+          <input type="date" value={form.vencimento} onChange={(e) => setForm({ ...form, vencimento: e.target.value })} required />
+          <select value={form.cartao} onChange={(e) => setForm({ ...form, cartao: e.target.value, contaId: e.target.value ? "" : form.contaId })}>
+            <option value="">Não é fatura de cartão</option>
+            {CARTOES_CONTAS.map((c) => (
+              <option key={c}>{c}</option>
+            ))}
+          </select>
+          <select value={form.contaId} onChange={(e) => setForm({ ...form, contaId: e.target.value, cartao: e.target.value ? "" : form.cartao })}>
+            <option value="">Conta bancária de pagamento (opcional)</option>
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.nome} — {a.titular}
+              </option>
+            ))}
+          </select>
+          <div className="form-actions">
+            <button type="submit" className="btn-primary">
+              Salvar
+            </button>
+            <button type="button" className="btn-ghost" onClick={() => setShowForm(false)}>
+              Cancelar
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
+
+/* ---------- Comprovantes Tab ---------- */
+function ComprovantesTab({ receipts, month, categorias, cards, accounts, onAdd, onDelete, loadPhoto, photoCache }) {
+  const [form, setForm] = useState({
+    data: todayISO(),
+    pessoa: "Messo",
+    categoria: categorias[0],
+    valor: "",
+    tipoPagamento: "pix",
+    pixPessoa: "Messo",
+    contaId: "",
+    cartao: cards[0]?.nome || "",
+    outroTexto: "",
+  });
+  const [file, setFile] = useState(null);
+  const [openPhoto, setOpenPhoto] = useState(null);
+
+  const doMes = receipts.filter((r) => r.data.slice(0, 7) === month).sort((a, b) => b.data.localeCompare(a.data));
+  const totalMes = doMes.reduce((s, r) => s + Number(r.valor), 0);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!form.valor) return;
+    let pagamento;
+    if (form.tipoPagamento === "pix") pagamento = { tipo: "pix", pessoa: form.pixPessoa, contaId: form.contaId || null };
+    else if (form.tipoPagamento === "cartao") pagamento = { tipo: "cartao", cartao: form.cartao };
+    else pagamento = { tipo: "outro", texto: form.outroTexto };
+
+    await onAdd({ data: form.data, pessoa: form.pessoa, categoria: form.categoria, valor: Number(form.valor), pagamento }, file);
+    setForm({ ...form, valor: "", outroTexto: "" });
+    setFile(null);
+    const el = document.getElementById("comprovante-file");
+    if (el) el.value = "";
+  };
+
+  const openPhotoFor = async (id) => {
+    const url = await loadPhoto(id);
+    setOpenPhoto(url);
+  };
+
+  return (
+    <div>
+      <div className="summary-bar">
+        <span>Total gasto na rua em {month.split("-").reverse().join("/")}</span>
+        <strong>{fmt(totalMes)}</strong>
+      </div>
+
+      <form className="form-card" onSubmit={submit}>
+        <div className="form-grid">
+          <label>
+            Data
+            <input type="date" value={form.data} onChange={(e) => setForm({ ...form, data: e.target.value })} required />
+          </label>
+          <label>
+            Quem gastou
+            <select value={form.pessoa} onChange={(e) => setForm({ ...form, pessoa: e.target.value })}>
+              {PESSOAS.map((p) => (
+                <option key={p}>{p}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Categoria
+            <select value={form.categoria} onChange={(e) => setForm({ ...form, categoria: e.target.value })}>
+              {categorias.map((c) => (
+                <option key={c}>{c}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Valor
+            <input type="number" step="0.01" placeholder="0,00" value={form.valor} onChange={(e) => setForm({ ...form, valor: e.target.value })} required />
+          </label>
+        </div>
+
+        <div className="payment-toggle">
+          {["pix", "cartao", "outro"].map((t) => (
+            <button type="button" key={t} className={"toggle-btn" + (form.tipoPagamento === t ? " toggle-active" : "")} onClick={() => setForm({ ...form, tipoPagamento: t })}>
+              {t === "pix" ? "Pix" : t === "cartao" ? "Cartão de crédito" : "Outros"}
+            </button>
+          ))}
+        </div>
+
+        {form.tipoPagamento === "pix" && (
+          <>
+            <select value={form.pixPessoa} onChange={(e) => setForm({ ...form, pixPessoa: e.target.value })}>
+              {PIX_PESSOAS.map((p) => (
+                <option key={p}>{p}</option>
+              ))}
+            </select>
+            <select value={form.contaId} onChange={(e) => setForm({ ...form, contaId: e.target.value })}>
+              <option value="">Conta de onde saiu (opcional)</option>
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.nome} — {a.titular}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
+        {form.tipoPagamento === "cartao" && (
+          <select value={form.cartao} onChange={(e) => setForm({ ...form, cartao: e.target.value })}>
+            {cards.map((c) => (
+              <option key={c.id}>{c.nome}</option>
+            ))}
+          </select>
+        )}
+        {form.tipoPagamento === "outro" && (
+          <input placeholder="Descreva a forma de pagamento" value={form.outroTexto} onChange={(e) => setForm({ ...form, outroTexto: e.target.value })} />
+        )}
+
+        <label className="file-label">
+          Foto do comprovante (opcional)
+          <input id="comprovante-file" type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+        </label>
+
+        <button type="submit" className="btn-primary">
+          Registrar gasto
+        </button>
+      </form>
+
+      <section className="group">
+        <div className="group-title">Lançamentos do mês</div>
+        {doMes.length === 0 && <p className="empty">Nenhum comprovante lançado ainda.</p>}
+        {doMes.map((r) => (
+          <div key={r.id} className="receipt-row">
+            <div className="receipt-main">
+              <div className="bill-name">
+                {r.categoria} <span className="chip">{r.pessoa}</span>
+              </div>
+              <div className="bill-meta">
+                {r.data.split("-").reverse().join("/")} ·{" "}
+                {r.pagamento.tipo === "pix"
+                  ? `Pix (${r.pagamento.pessoa})${r.pagamento.contaId ? " — " + (accounts.find((a) => a.id === r.pagamento.contaId)?.nome || "") : ""}`
+                  : r.pagamento.tipo === "cartao"
+                  ? `Cartão ${r.pagamento.cartao}`
+                  : r.pagamento.texto || "Outros"}
+              </div>
+            </div>
+            <div className="bill-value">{fmt(r.valor)}</div>
+            {r.hasPhoto && (
+              <button className="icon-btn" title="Ver foto" onClick={() => openPhotoFor(r.id)}>
+                📷
+              </button>
+            )}
+            <button className="icon-btn" title="Excluir" onClick={() => onDelete(r.id)}>
+              ✕
+            </button>
+          </div>
+        ))}
+      </section>
+
+      {openPhoto && (
+        <div className="modal-backdrop" onClick={() => setOpenPhoto(null)}>
+          <img src={openPhoto} alt="Comprovante" className="modal-img" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------- Metas Tab ---------- */
+function MetasTab({ config, onSave, categoryUsage, allCategorias }) {
+  const [goals, setGoals] = useState(config.goals);
+  const [novaCategoria, setNovaCategoria] = useState("");
+  const [novoCartaoNome, setNovoCartaoNome] = useState("");
+  const [novaConta, setNovaConta] = useState({ nome: "", titular: TITULARES[0], tipo: "" });
+  const [transf, setTransf] = useState({ origemId: "", destinoId: "", valor: "", data: todayISO(), motivo: "" });
+
+  useEffect(() => setGoals(config.goals), [config]);
+
+  const salvarMetas = () => onSave({ ...config, goals });
+
+  const addCategoria = () => {
+    if (!novaCategoria.trim()) return;
+    const nome = novaCategoria.trim();
+    onSave({ ...config, customCategories: [...config.customCategories, nome], goals: { ...config.goals, [nome]: 0 } });
+    setNovaCategoria("");
+  };
+  const removeCategoria = (nome) => {
+    onSave({ ...config, customCategories: config.customCategories.filter((c) => c !== nome), goals: Object.fromEntries(Object.entries(config.goals).filter(([k]) => k !== nome)) });
+  };
+
+  const addCartao = () => {
+    if (!novoCartaoNome.trim()) return;
+    onSave({ ...config, cards: [...config.cards, { id: uid(), nome: novoCartaoNome.trim(), limite: 0, disponivel: 0 }] });
+    setNovoCartaoNome("");
+  };
+  const removeCartao = (id) => onSave({ ...config, cards: config.cards.filter((c) => c.id !== id) });
+  const setCartaoCampo = (id, campo, valor) => onSave({ ...config, cards: config.cards.map((c) => (c.id === id ? { ...c, [campo]: valor } : c)) });
+  const ajustarCartaoComLog = (card, delta, motivo) => {
+    onSave({
+      ...config,
+      cards: config.cards.map((c) => (c.id === card.id ? { ...c, disponivel: Number(c.disponivel || 0) + delta } : c)),
+      adjustments: [{ id: uid(), target: "cartao:" + card.id, label: card.nome, delta, motivo, data: todayISO() }, ...config.adjustments].slice(0, 40),
+    });
+  };
+
+  const addConta = () => {
+    if (!novaConta.nome.trim()) return;
+    onSave({ ...config, accounts: [...config.accounts, { id: uid(), nome: novaConta.nome.trim(), titular: novaConta.titular, tipo: novaConta.tipo, saldo: 0 }] });
+    setNovaConta({ nome: "", titular: TITULARES[0], tipo: "" });
+  };
+  const removeConta = (id) => onSave({ ...config, accounts: config.accounts.filter((a) => a.id !== id) });
+  const setContaCampo = (id, campo, valor) => onSave({ ...config, accounts: config.accounts.map((a) => (a.id === id ? { ...a, [campo]: valor } : a)) });
+  const ajustarContaComLog = (conta, delta, motivo) => {
+    onSave({
+      ...config,
+      accounts: config.accounts.map((a) => (a.id === conta.id ? { ...a, saldo: Number(a.saldo || 0) + delta } : a)),
+      adjustments: [{ id: uid(), target: "conta:" + conta.id, label: conta.nome, delta, motivo, data: todayISO() }, ...config.adjustments].slice(0, 40),
+    });
+  };
+
+  const realizarTransferencia = () => {
+    if (!transf.origemId || !transf.destinoId || transf.origemId === transf.destinoId || !transf.valor) return;
+    const valor = Number(transf.valor);
+    onSave({
+      ...config,
+      accounts: config.accounts.map((a) => {
+        if (a.id === transf.origemId) return { ...a, saldo: Number(a.saldo || 0) - valor };
+        if (a.id === transf.destinoId) return { ...a, saldo: Number(a.saldo || 0) + valor };
+        return a;
+      }),
+      transfers: [{ id: uid(), origemId: transf.origemId, destinoId: transf.destinoId, valor, data: transf.data || todayISO(), motivo: transf.motivo }, ...config.transfers].slice(0, 50),
+    });
+    setTransf({ origemId: "", destinoId: "", valor: "", data: todayISO(), motivo: "" });
+  };
+  const desfazerTransferencia = (t) => {
+    onSave({
+      ...config,
+      accounts: config.accounts.map((a) => {
+        if (a.id === t.origemId) return { ...a, saldo: Number(a.saldo || 0) + t.valor };
+        if (a.id === t.destinoId) return { ...a, saldo: Number(a.saldo || 0) - t.valor };
+        return a;
+      }),
+      transfers: config.transfers.filter((x) => x.id !== t.id),
+    });
+  };
+  const nomeConta = (id) => config.accounts.find((a) => a.id === id)?.nome || "?";
+
+  return (
+    <div>
+      <section className="group">
+        <div className="group-title">Limites e saldo disponível dos cartões</div>
+        <p className="hint">"Disponível" é o crédito livre agora. Compras no cartão descontam automaticamente; pagar a fatura devolve o valor. Use o ajuste manual para corrigir qualquer diferença.</p>
+        {config.cards.map((c) => {
+          const limite = Number(c.limite || 0);
+          const disp = Number(c.disponivel || 0);
+          const usado = limite > 0 ? limite - disp : null;
+          const pct = limite > 0 ? Math.min(100, Math.max(0, (usado / limite) * 100)) : 0;
+          const over = disp < 0;
+          return (
+            <div key={c.id} className="limit-card">
+              <div className="limit-header">
+                <span>{c.nome}</span>
+                <button className="icon-btn" title="Remover cartão" onClick={() => removeCartao(c.id)}>
+                  ✕
+                </button>
+              </div>
+              <div className="limit-inputs">
+                <label>
+                  Limite total
+                  <input type="number" className="mini-input" value={c.limite} onChange={(e) => setCartaoCampo(c.id, "limite", e.target.value)} />
+                </label>
+                <label>
+                  Disponível agora
+                  <input type="number" className="mini-input" value={c.disponivel} onChange={(e) => setCartaoCampo(c.id, "disponivel", e.target.value)} />
+                </label>
+              </div>
+              {limite > 0 && (
+                <div className="progress-track">
+                  <div className="progress-fill" style={{ width: pct + "%", background: over ? "var(--red)" : pct > 80 ? "var(--gold)" : "var(--green)" }} />
+                </div>
+              )}
+              <div className="limit-footer" style={{ color: over ? "var(--red)" : "var(--muted)" }}>
+                {over ? `Estourado em ${fmt(-disp)}` : `Disponível: ${fmt(disp)}`}
+              </div>
+              <AjusteForm onApply={(delta, motivo) => ajustarCartaoComLog(c, delta, motivo)} />
+            </div>
+          );
+        })}
+        <div className="inline-add">
+          <input placeholder="Nome do novo cartão" value={novoCartaoNome} onChange={(e) => setNovoCartaoNome(e.target.value)} />
+          <button className="btn-outline btn-sm" onClick={addCartao}>
+            + Adicionar cartão
+          </button>
+        </div>
+      </section>
+
+      <section className="group">
+        <div className="group-title">Metas por categoria (gastos na rua)</div>
+        {allCategorias.map((c) => {
+          const used = categoryUsage[c] || 0;
+          const goal = Number(goals[c] || 0);
+          const remaining = goal - used;
+          const over = goal > 0 && remaining < 0;
+          const pct = goal > 0 ? Math.min(100, (used / goal) * 100) : 0;
+          const custom = config.customCategories.includes(c);
+          return (
+            <div key={c} className="limit-card">
+              <div className="limit-header">
+                <span>{c}</span>
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <input type="number" className="mini-input" value={goals[c] || 0} onChange={(e) => setGoals({ ...goals, [c]: e.target.value })} placeholder="Meta" />
+                  {custom && (
+                    <button className="icon-btn" onClick={() => removeCategoria(c)}>
+                      ✕
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="progress-track">
+                <div className="progress-fill" style={{ width: pct + "%", background: over ? "var(--red)" : pct > 80 ? "var(--gold)" : "var(--green)" }} />
+              </div>
+              <div className="limit-footer" style={{ color: over ? "var(--red)" : "var(--muted)" }}>
+                Gasto {fmt(used)} de {goal ? fmt(goal) : "—"}
+              </div>
+            </div>
+          );
+        })}
+        <div className="inline-add">
+          <input placeholder="Nova categoria" value={novaCategoria} onChange={(e) => setNovaCategoria(e.target.value)} />
+          <button className="btn-outline btn-sm" onClick={addCategoria}>
+            + Adicionar categoria
+          </button>
+        </div>
+        <button className="btn-primary" style={{ marginTop: 10 }} onClick={salvarMetas}>
+          Salvar metas
+        </button>
+      </section>
+
+      <section className="group">
+        <div className="group-title">Contas bancárias e saldo real</div>
+        {config.accounts.map((a) => (
+          <div key={a.id} className="account-row-full">
+            <div className="account-row-edit">
+              <input className="mini-input mini-input-text" value={a.nome} onChange={(e) => setContaCampo(a.id, "nome", e.target.value)} placeholder="Nome" />
+              <select className="mini-select" value={a.titular} onChange={(e) => setContaCampo(a.id, "titular", e.target.value)}>
+                {TITULARES.map((t) => (
+                  <option key={t}>{t}</option>
+                ))}
+              </select>
+              <input className="mini-input mini-input-text" value={a.tipo} onChange={(e) => setContaCampo(a.id, "tipo", e.target.value)} placeholder="Tipo (PF/PJ/Mesada)" />
+              <input type="number" className="mini-input" value={a.saldo} onChange={(e) => setContaCampo(a.id, "saldo", e.target.value)} placeholder="Saldo" />
+              <button className="icon-btn" title="Remover conta" onClick={() => removeConta(a.id)}>
+                ✕
+              </button>
+            </div>
+            <AjusteForm onApply={(delta, motivo) => ajustarContaComLog(a, delta, motivo)} />
+          </div>
+        ))}
+        <div className="inline-add-grid">
+          <input placeholder="Nome da conta" value={novaConta.nome} onChange={(e) => setNovaConta({ ...novaConta, nome: e.target.value })} />
+          <select value={novaConta.titular} onChange={(e) => setNovaConta({ ...novaConta, titular: e.target.value })}>
+            {TITULARES.map((t) => (
+              <option key={t}>{t}</option>
+            ))}
+          </select>
+          <input placeholder="Tipo (PF/PJ/Mesada)" value={novaConta.tipo} onChange={(e) => setNovaConta({ ...novaConta, tipo: e.target.value })} />
+          <button className="btn-outline btn-sm" onClick={addConta}>
+            + Adicionar conta
+          </button>
+        </div>
+      </section>
+
+      <section className="group">
+        <div className="group-title">Transferência entre contas</div>
+        <p className="hint">Não entra como recebimento nem gasto — só ajusta o saldo de quem enviou e de quem recebeu.</p>
+        <div className="form-card">
+          <div className="form-grid">
+            <label>
+              De
+              <select value={transf.origemId} onChange={(e) => setTransf({ ...transf, origemId: e.target.value })}>
+                <option value="">Selecione</option>
+                {config.accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.nome} — {a.titular}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Para
+              <select value={transf.destinoId} onChange={(e) => setTransf({ ...transf, destinoId: e.target.value })}>
+                <option value="">Selecione</option>
+                {config.accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.nome} — {a.titular}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Valor
+              <input type="number" step="0.01" value={transf.valor} onChange={(e) => setTransf({ ...transf, valor: e.target.value })} />
+            </label>
+            <label>
+              Data
+              <input type="date" value={transf.data} onChange={(e) => setTransf({ ...transf, data: e.target.value })} />
+            </label>
+          </div>
+          <input placeholder="Motivo (opcional, ex: mesada da Mel)" value={transf.motivo} onChange={(e) => setTransf({ ...transf, motivo: e.target.value })} />
+          <button className="btn-primary" onClick={realizarTransferencia}>
+            Transferir
+          </button>
+        </div>
+        {config.transfers.length > 0 && (
+          <div style={{ marginTop: 10 }}>
+            {config.transfers.slice(0, 8).map((t) => (
+              <div key={t.id} className="adj-row">
+                <span>{t.data.split("-").reverse().join("/")}</span>
+                <span>
+                  {nomeConta(t.origemId)} → {nomeConta(t.destinoId)}
+                </span>
+                <span style={{ fontFamily: "var(--mono)" }}>{fmt(t.valor)}</span>
+                <span className="adj-motivo">
+                  {t.motivo}
+                  <button className="link-btn" style={{ marginLeft: 8 }} onClick={() => desfazerTransferencia(t)}>
+                    desfazer
+                  </button>
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {config.adjustments.length > 0 && (
+        <section className="group">
+          <div className="group-title">Histórico de ajustes manuais</div>
+          {config.adjustments.slice(0, 8).map((a) => (
+            <div key={a.id} className="adj-row">
+              <span>{a.data.split("-").reverse().join("/")}</span>
+              <span>{a.label}</span>
+              <span style={{ color: a.delta >= 0 ? "var(--green)" : "var(--red)" }}>
+                {a.delta >= 0 ? "+" : ""}
+                {fmt(a.delta)}
+              </span>
+              <span className="adj-motivo">{a.motivo}</span>
+            </div>
+          ))}
+        </section>
+      )}
+    </div>
+  );
+}
+
+/* ---------- Extrato Tab ---------- */
+function ExtratoTab({ bills, receipts, incomes, accounts, adjustments, transfers, month, onToggleIncome, onAddIncome, onDeleteIncome }) {
+  const [form, setForm] = useState({ pessoa: "", descricao: "", origem: ORIGENS_RECEBIMENTO[0], valor: "", data: month + "-28" });
+  const [visao, setVisao] = useState("geral");
+  const [contaSelecionada, setContaSelecionada] = useState(accounts[0]?.id || "");
+
+  const lancamentos = useMemo(() => {
+    const fromBills = bills
+      .filter((b) => b.status === "pago" && b.vencimento.slice(0, 7) === month)
+      .map((b) => ({ data: b.vencimento, desc: b.nome, categoria: b.categoria, valor: b.valor, tipo: "Conta paga" }));
+    const fromReceipts = receipts
+      .filter((r) => r.data.slice(0, 7) === month)
+      .map((r) => ({ data: r.data, desc: r.categoria + " — " + r.pessoa, categoria: r.categoria, valor: r.valor, tipo: "Gasto na rua" }));
+    return [...fromBills, ...fromReceipts].sort((a, b) => a.data.localeCompare(b.data));
+  }, [bills, receipts, month]);
+  const totalSaida = lancamentos.reduce((s, l) => s + l.valor, 0);
+
+  const nomeConta = (id) => accounts.find((a) => a.id === id)?.nome || "?";
+  const movimentosConta = useMemo(() => {
+    if (!contaSelecionada) return [];
+    const rec = receipts
+      .filter((r) => r.pagamento.tipo === "pix" && r.pagamento.contaId === contaSelecionada && r.data.slice(0, 7) === month)
+      .map((r) => ({ data: r.data, desc: `Gasto: ${r.categoria} (${r.pessoa})`, valor: -r.valor }));
+    const contas = bills
+      .filter((b) => b.contaId === contaSelecionada && b.status === "pago" && b.vencimento.slice(0, 7) === month)
+      .map((b) => ({ data: b.vencimento, desc: `Conta paga: ${b.nome}`, valor: -b.valor }));
+    const adj = adjustments
+      .filter((a) => a.target === "conta:" + contaSelecionada && a.data.slice(0, 7) === month)
+      .map((a) => ({ data: a.data, desc: `Ajuste: ${a.motivo || "sem motivo"}`, valor: a.delta }));
+    const transfOut = transfers
+      .filter((t) => t.origemId === contaSelecionada && t.data.slice(0, 7) === month)
+      .map((t) => ({ data: t.data, desc: `Transferência para ${nomeConta(t.destinoId)}${t.motivo ? " — " + t.motivo : ""}`, valor: -t.valor }));
+    const transfIn = transfers
+      .filter((t) => t.destinoId === contaSelecionada && t.data.slice(0, 7) === month)
+      .map((t) => ({ data: t.data, desc: `Transferência de ${nomeConta(t.origemId)}${t.motivo ? " — " + t.motivo : ""}`, valor: t.valor }));
+    return [...rec, ...contas, ...adj, ...transfOut, ...transfIn].sort((a, b) => a.data.localeCompare(b.data));
+  }, [contaSelecionada, receipts, bills, adjustments, transfers, month, accounts]);
+
+  const contaAtual = accounts.find((a) => a.id === contaSelecionada);
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (!form.pessoa || !form.valor) return;
+    onAddIncome({ pessoa: form.pessoa, descricao: form.descricao, origem: form.origem, valor: Number(form.valor), data: form.data, recebido: false });
+    setForm({ pessoa: "", descricao: "", origem: ORIGENS_RECEBIMENTO[0], valor: "", data: month + "-28" });
+  };
+
+  return (
+    <div>
+      <div className="payment-toggle" style={{ marginBottom: 16 }}>
+        <button className={"toggle-btn" + (visao === "geral" ? " toggle-active" : "")} onClick={() => setVisao("geral")}>
+          Visão geral
+        </button>
+        <button className={"toggle-btn" + (visao === "conta" ? " toggle-active" : "")} onClick={() => setVisao("conta")}>
+          Por conta bancária
+        </button>
+      </div>
+
+      {visao === "conta" ? (
+        <section className="group">
+          <div className="group-title">
+            Extrato por conta
+            <select className="month-select" value={contaSelecionada} onChange={(e) => setContaSelecionada(e.target.value)} style={{ marginLeft: "auto" }}>
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.nome} — {a.titular}
+                </option>
+              ))}
+            </select>
+          </div>
+          {contaAtual && (
+            <div className="summary-bar">
+              <span>Saldo real de {contaAtual.nome}</span>
+              <strong>{fmt(contaAtual.saldo)}</strong>
+            </div>
+          )}
+          {movimentosConta.length === 0 && <p className="empty">Sem movimentos vinculados a essa conta em {month.split("-").reverse().join("/")}.</p>}
+          {movimentosConta.map((m, idx) => (
+            <div key={idx} className="bill-row">
+              <div className="bill-info">
+                <div className="bill-name">{m.desc}</div>
+                <div className="bill-meta">{m.data.split("-").reverse().join("/")}</div>
+              </div>
+              <div className="bill-value" style={{ color: m.valor >= 0 ? "var(--green)" : "var(--red)" }}>
+                {m.valor >= 0 ? "+" : ""}
+                {fmt(m.valor)}
+              </div>
+            </div>
+          ))}
+          <p className="footnote">
+            Aparecem aqui: gastos na rua via Pix vinculados a esta conta, contas pagas com esta conta marcada, ajustes manuais e transferências. Gastos sem conta vinculada não aparecem — vincule a
+            conta na hora de registrar para um extrato completo.
+          </p>
+        </section>
+      ) : (
+        <>
+          <section className="group">
+            <div className="group-title">Recebimentos (previstos e recebidos)</div>
+            {incomes.map((i) => (
+              <div key={i.id} className="bill-row">
+                <input type="checkbox" checked={i.recebido} onChange={() => onToggleIncome(i.id)} className="checkbox" />
+                <div className="bill-info">
+                  <div className="bill-name">
+                    {i.pessoa} <span className="chip">{i.origem || "Outro"}</span>
+                  </div>
+                  <div className="bill-meta">
+                    {i.descricao} · {i.data.split("-").reverse().join("/")}
+                  </div>
+                </div>
+                <div className="bill-value">{fmt(i.valor)}</div>
+                <StatusPill status={i.recebido ? "pago" : "pendente"} labels={{ pago: "Recebido", pendente: "Previsto" }} />
+                <button className="icon-btn" onClick={() => onDeleteIncome(i.id)}>
+                  ✕
+                </button>
+              </div>
+            ))}
+            <form className="form-card" onSubmit={submit}>
+              <div className="form-grid">
+                <label>
+                  Pessoa
+                  <input placeholder="Pessoa" value={form.pessoa} onChange={(e) => setForm({ ...form, pessoa: e.target.value })} />
+                </label>
+                <label>
+                  Origem
+                  <select value={form.origem} onChange={(e) => setForm({ ...form, origem: e.target.value })}>
+                    {ORIGENS_RECEBIMENTO.map((o) => (
+                      <option key={o}>{o}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Valor
+                  <input type="number" step="0.01" placeholder="Valor" value={form.valor} onChange={(e) => setForm({ ...form, valor: e.target.value })} />
+                </label>
+                <label>
+                  Data prevista
+                  <input type="date" value={form.data} onChange={(e) => setForm({ ...form, data: e.target.value })} />
+                </label>
+              </div>
+              <input placeholder="Descrição (opcional)" value={form.descricao} onChange={(e) => setForm({ ...form, descricao: e.target.value })} />
+              <button className="btn-primary" type="submit">
+                Adicionar recebimento
+              </button>
+            </form>
+          </section>
+
+          <section className="group">
+            <div className="group-title">
+              Extrato de {month.split("-").reverse().join("/")} <span className="group-count">— saída total {fmt(totalSaida)}</span>
+            </div>
+            {lancamentos.length === 0 && <p className="empty">Sem lançamentos neste mês ainda.</p>}
+            {lancamentos.map((l, idx) => (
+              <div key={idx} className="bill-row">
+                <div className="bill-info">
+                  <div className="bill-name">{l.desc}</div>
+                  <div className="bill-meta">
+                    {l.tipo} · {l.categoria} · {l.data.split("-").reverse().join("/")}
+                  </div>
+                </div>
+                <div className="bill-value">{fmt(l.valor)}</div>
+              </div>
+            ))}
+          </section>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ---------- Dívidas Tab ---------- */
+function DividasTab({ debts, onToggle }) {
+  const grupos = ["Pessoal", "Rogue/PJ"];
+  return (
+    <div>
+      {grupos.map((g) => {
+        const items = debts.filter((d) => d.grupo === g);
+        const total = items.filter((i) => !i.quitado).reduce((s, i) => s + i.valor, 0);
+        return (
+          <section className="group" key={g}>
+            <div className="group-title">
+              {g} <span className="group-count">— em aberto {fmt(total)}</span>
+            </div>
+            {items.map((d) => (
+              <div key={d.id} className={"bill-row" + (d.quitado ? " bill-paid" : "")}>
+                <input type="checkbox" checked={d.quitado} onChange={() => onToggle(d.id)} className="checkbox" />
+                <div className="bill-info">
+                  <div className="bill-name">{d.nome}</div>
+                  {d.obs && <div className="bill-meta">{d.obs}</div>}
+                </div>
+                <div className="bill-value">{fmt(d.valor)}</div>
+                <StatusPill status={d.quitado ? "pago" : "pendente"} labels={{ pago: "Quitado", pendente: "Em aberto" }} />
+              </div>
+            ))}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ---------- styles ---------- */
+function GlobalStyle() {
+  return (
+    <style>{`
+      :root {
+        --bg: #14171C; --surface: #1B1F26; --surface-raised: #232830; --border: #2E333C;
+        --text: #EDEAE3; --muted: #9AA0AA; --gold: #D9A441; --green: #4FAE7C; --red: #D9614F;
+        --serif: Georgia, 'Iowan Old Style', 'Times New Roman', serif;
+        --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      .app { background: var(--bg); color: var(--text); min-height: 100vh; font-family: var(--sans); padding-bottom: 40px; }
+      .header { padding: 20px 16px 0; border-bottom: 1px solid var(--border); }
+      .header-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+      .header-top h1 { font-family: var(--serif); font-size: 22px; margin: 0; font-weight: 700; letter-spacing: 0.3px; }
+      .month-select { background: var(--surface-raised); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-family: var(--sans); font-size: 13px; text-transform: capitalize; }
+      .ledger-tape { background: var(--surface); border: 1px solid var(--border); border-radius: 10px 10px 0 0; padding: 14px 16px 18px; position: relative; }
+      .ledger-tape::after { content: ""; position: absolute; left: 0; right: 0; bottom: -8px; height: 8px; background-image: radial-gradient(circle at 8px 0, transparent 6px, var(--bg) 7px); background-size: 16px 8px; background-repeat: repeat-x; }
+      .ledger-row { display: flex; align-items: baseline; gap: 6px; padding: 4px 0; font-family: var(--mono); font-size: 13px; }
+      .ledger-label { color: var(--muted); white-space: nowrap; }
+      .ledger-dots { flex: 1; border-bottom: 1px dotted var(--border); margin-bottom: 4px; }
+      .ledger-value { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+      .tabs { display: flex; gap: 4px; overflow-x: auto; padding: 16px 16px 0; }
+      .tab { background: none; border: none; color: var(--muted); padding: 10px 14px; font-size: 13px; font-family: var(--sans); font-weight: 600; border-radius: 8px 8px 0 0; cursor: pointer; white-space: nowrap; }
+      .tab-active { color: var(--text); background: var(--surface); border: 1px solid var(--border); border-bottom: none; }
+      .content { background: var(--surface); margin: 0 16px; padding: 20px 16px; border-radius: 0 0 10px 10px; border: 1px solid var(--border); border-top: none; }
+      .group { margin-bottom: 24px; }
+      .group-title { font-family: var(--serif); font-size: 15px; font-weight: 700; margin-bottom: 10px; letter-spacing: 0.2px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+      .group-count { font-family: var(--mono); font-size: 12px; color: var(--muted); font-weight: 400; }
+      .empty { color: var(--muted); font-size: 13px; font-style: italic; }
+      .hint { color: var(--muted); font-size: 12px; margin: -4px 0 10px; line-height: 1.5; }
+      .bill-row, .receipt-row { display: flex; align-items: center; gap: 10px; padding: 10px 8px; border-bottom: 1px solid var(--border); }
+      .bill-row:last-child, .receipt-row:last-child { border-bottom: none; }
+      .bill-paid { opacity: 0.5; }
+      .checkbox { width: 18px; height: 18px; accent-color: var(--green); flex-shrink: 0; }
+      .bill-info, .receipt-main { flex: 1; min-width: 0; }
+      .bill-name { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+      .bill-meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+      .bill-obs { font-style: italic; }
+      .bill-value { font-family: var(--mono); font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+      .chip { background: var(--surface-raised); border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; font-size: 10px; color: var(--muted); text-transform: none; }
+      .bill-actions { display: flex; gap: 4px; }
+      .icon-btn { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 14px; padding: 4px 6px; border-radius: 6px; }
+      .icon-btn:hover { background: var(--surface-raised); color: var(--text); }
+      .link-btn { background: none; border: none; color: var(--gold); font-size: 11px; cursor: pointer; padding: 2px 0; }
+      .btn-outline { background: none; border: 1px dashed var(--border); color: var(--muted); padding: 10px; width: 100%; border-radius: 8px; font-size: 13px; cursor: pointer; }
+      .btn-primary { background: var(--gold); color: #1B1206; border: none; padding: 10px 18px; border-radius: 8px; font-weight: 700; font-size: 13px; cursor: pointer; }
+      .btn-ghost { background: none; border: 1px solid var(--border); color: var(--muted); padding: 10px 18px; border-radius: 8px; font-size: 13px; cursor: pointer; }
+      .btn-sm { padding: 6px 10px; font-size: 12px; }
+      .form-card { background: var(--surface-raised); border: 1px solid var(--border); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+      .form-card input, .form-card select { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 9px 10px; border-radius: 6px; font-size: 13px; font-family: var(--sans); }
+      .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      .form-grid label, .file-label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--muted); }
+      .form-actions { display: flex; gap: 8px; }
+      .payment-toggle { display: flex; gap: 6px; }
+      .toggle-btn { flex: 1; background: var(--bg); border: 1px solid var(--border); color: var(--muted); padding: 8px; border-radius: 6px; font-size: 12px; cursor: pointer; }
+      .toggle-active { border-color: var(--gold); color: var(--gold); }
+      .toggle-sm { flex: none; padding: 4px 10px; }
+      .window-toggle { display: flex; gap: 4px; margin-left: auto; }
+      .summary-bar { display: flex; justify-content: space-between; align-items: center; background: var(--surface-raised); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 13px; }
+      .summary-bar strong { font-family: var(--mono); font-size: 15px; }
+      .limit-card { background: var(--surface-raised); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
+      .limit-header { display: flex; justify-content: space-between; align-items: center; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+      .limit-inputs { display: flex; gap: 12px; margin-bottom: 8px; }
+      .limit-inputs label { display: flex; flex-direction: column; gap: 3px; font-size: 10px; color: var(--muted); }
+      .mini-input { width: 90px; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 4px 6px; border-radius: 5px; font-size: 12px; text-align: right; }
+      .progress-track { height: 6px; background: var(--bg); border-radius: 4px; overflow: hidden; }
+      .progress-fill { height: 100%; border-radius: 4px; transition: width .2s; }
+      .limit-footer { font-size: 11px; margin-top: 6px; font-family: var(--mono); }
+      .account-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0 4px; font-size: 13px; }
+      .account-row-edit { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 8px 0 4px; }
+      .mini-select { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 5px 6px; border-radius: 5px; font-size: 12px; }
+      .mini-input-text { width: 120px; text-align: left; }
+      .account-row-full { border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 4px; }
+      .account-row-full:last-child { border-bottom: none; }
+      .inline-add { display: flex; gap: 8px; margin-top: 8px; }
+      .inline-add input { flex: 1; background: var(--surface-raised); border: 1px solid var(--border); color: var(--text); padding: 8px 10px; border-radius: 6px; font-size: 13px; }
+      .inline-add-grid { display: grid; grid-template-columns: 1.4fr 1fr 1fr auto; gap: 8px; margin-top: 10px; }
+      .inline-add-grid input, .inline-add-grid select { background: var(--surface-raised); border: 1px solid var(--border); color: var(--text); padding: 8px 10px; border-radius: 6px; font-size: 13px; }
+      .ajuste-form { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+      .ajuste-form input { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 5px 8px; border-radius: 5px; font-size: 12px; }
+      .ajuste-form input:first-child { width: 90px; }
+      .ajuste-form input:nth-child(2) { flex: 1; min-width: 120px; }
+      .adj-row { display: grid; grid-template-columns: 60px 140px 90px 1fr; gap: 8px; font-size: 12px; padding: 6px 0; border-bottom: 1px solid var(--border); align-items: center; }
+      .adj-row:last-child { border-bottom: none; }
+      .adj-motivo { color: var(--muted); font-style: italic; }
+      .chart-box { background: var(--surface-raised); border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
+      .forecast-summary { display: flex; gap: 16px; font-size: 12px; font-family: var(--mono); margin-bottom: 10px; flex-wrap: wrap; }
+      .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 20px; }
+      .modal-img { max-width: 100%; max-height: 90vh; border-radius: 8px; }
+      .footnote { font-size: 11px; color: var(--muted); margin-top: 10px; line-height: 1.5; }
+      @media (max-width: 480px) {
+        .form-grid { grid-template-columns: 1fr; }
+        .ledger-tape { display: flex; flex-direction: column; }
+        .adj-row { grid-template-columns: 1fr 1fr; }
+        .inline-add-grid { grid-template-columns: 1fr; }
+      }
+    `}</style>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App />);
+</script>
+</body>
+</html>
