@@ -6,18 +6,57 @@
 <title>Painel Financeiro</title>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script crossorigin src="https://unpkg.com/prop-types/prop-types.min.js"></script>
-<script crossorigin src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
 <script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body style="margin:0">
 <div id="root"></div>
-<script type="text/babel" data-presets="react">
+<script>
+  window.onerror = function (msg, url, line, col, error) {
+    var root = document.getElementById("root");
+    if (root) {
+      root.innerHTML =
+        '<pre style="color:#f66;background:#14171C;padding:20px;white-space:pre-wrap;font-family:monospace;font-size:13px;">' +
+        "Erro ao carregar o painel:\n" + msg + "\n(linha " + line + ")" +
+        "</pre>";
+    }
+  };
+</script>
+<script type="text/plain" id="app-source">
 const { useState, useEffect, useMemo, useCallback } = React;
-const { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } = Recharts;
 
-/* ---------- COLE AQUI O LINK DO SEU APPS SCRIPT (etapa 3) ---------- */
+/* ---------- link do Apps Script (backend na planilha Google) ---------- */
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwL52Vw41C-gs_dtaXRdhRkvH_zSEQPE3gJujRBvHvI8UQydYBNEV8QO0yTjfhkvNsm/exec";
+
+/* ---------- gráfico de barras simples, sem biblioteca externa ---------- */
+function SimpleBarChart({ data, horizontal }) {
+  const max = Math.max(1, ...data.map((d) => d.valor));
+  if (horizontal) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {data.map((d, i) => (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ width: 150, fontSize: 12, color: "#EDEAE3", flexShrink: 0, textAlign: "right" }}>{d.name}</div>
+            <div style={{ flex: 1, background: "#1B1F26", borderRadius: 6, overflow: "hidden", height: 22 }}>
+              <div style={{ width: (d.valor / max) * 100 + "%", background: d.cor || "#D9A441", height: "100%", borderRadius: 6, transition: "width .3s" }} />
+            </div>
+            <div style={{ width: 90, fontSize: 12, fontFamily: "var(--mono)", color: "#EDEAE3", flexShrink: 0 }}>{fmt(d.valor)}</div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", gap: 16, height: 200, padding: "0 8px" }}>
+      {data.map((d, i) => (
+        <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6, height: "100%", justifyContent: "flex-end" }}>
+          <div style={{ fontSize: 12, fontFamily: "var(--mono)", color: "#EDEAE3" }}>{fmt(d.valor)}</div>
+          <div style={{ width: "70%", maxWidth: 70, height: Math.max(4, (d.valor / max) * 150) + "px", background: d.cor || "#D9A441", borderRadius: "6px 6px 0 0", transition: "height .3s" }} />
+          <div style={{ fontSize: 12, color: "#9AA0AA", textAlign: "center" }}>{d.name}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 /* ---------- constantes ---------- */
 const CATEGORIAS_BASE = [
@@ -360,7 +399,9 @@ function App() {
     const saldoContas = config.accounts.reduce((s, a) => s + Number(a.saldo || 0), 0);
     const recebido = incomes.filter((i) => i.recebido && i.data.slice(0, 7) === month).reduce((s, i) => s + Number(i.valor), 0);
     const aReceber = incomes.filter((i) => !i.recebido && i.data.slice(0, 7) === month).reduce((s, i) => s + Number(i.valor), 0);
-    return { atrasado, aVencer, pagoNoMes, gastosRua, saldoContas, recebido, aReceber };
+    const saldoPrevisto = saldoContas + aReceber - (atrasado + aVencer);
+    const saldoReal = saldoContas + recebido - pagoNoMes;
+    return { atrasado, aVencer, pagoNoMes, gastosRua, saldoContas, recebido, aReceber, saldoPrevisto, saldoReal };
   }, [bills, receipts, month, config, incomes]);
 
   const categoryUsage = useMemo(() => {
@@ -524,6 +565,8 @@ function App() {
           <LedgerRow label="Gasto na rua (mês)" value={totals.gastosRua} />
           <LedgerRow label="Saldo em contas" value={totals.saldoContas} tone="good" />
           <LedgerRow label="A receber no mês" value={totals.aReceber} tone="warn" />
+          <LedgerRow label="Saldo previsto" value={totals.saldoPrevisto} tone={totals.saldoPrevisto >= 0 ? "good" : "danger"} />
+          <LedgerRow label="Saldo real" value={totals.saldoReal} tone={totals.saldoReal >= 0 ? "good" : "danger"} />
         </div>
       </header>
 
@@ -591,19 +634,7 @@ function DashboardTab({ totals, categoryUsage, proximos, month }) {
       <section className="group">
         <div className="group-title">Gastos e recebimentos — {month.split("-").reverse().join("/")}</div>
         <div className="chart-box">
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={geral} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#2E333C" vertical={false} />
-              <XAxis dataKey="name" tick={{ fill: "#9AA0AA", fontSize: 12 }} axisLine={{ stroke: "#2E333C" }} tickLine={false} />
-              <YAxis tick={{ fill: "#9AA0AA", fontSize: 11 }} axisLine={false} tickLine={false} width={40} />
-              <Tooltip contentStyle={{ background: "#232830", border: "1px solid #2E333C", borderRadius: 8, color: "#EDEAE3" }} formatter={(v) => fmt(v)} />
-              <Bar dataKey="valor" radius={[6, 6, 0, 0]}>
-                {geral.map((g, i) => (
-                  <Cell key={i} fill={g.cor} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+          <SimpleBarChart data={geral} />
         </div>
       </section>
 
@@ -611,15 +642,7 @@ function DashboardTab({ totals, categoryUsage, proximos, month }) {
         <section className="group">
           <div className="group-title">Gastos na rua por categoria</div>
           <div className="chart-box">
-            <ResponsiveContainer width="100%" height={Math.max(120, porCategoria.length * 34)}>
-              <BarChart data={porCategoria} layout="vertical" margin={{ top: 4, right: 20, left: 8, bottom: 4 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#2E333C" horizontal={false} />
-                <XAxis type="number" tick={{ fill: "#9AA0AA", fontSize: 11 }} axisLine={{ stroke: "#2E333C" }} tickLine={false} />
-                <YAxis type="category" dataKey="name" tick={{ fill: "#EDEAE3", fontSize: 12 }} axisLine={false} tickLine={false} width={170} />
-                <Tooltip contentStyle={{ background: "#232830", border: "1px solid #2E333C", borderRadius: 8, color: "#EDEAE3" }} formatter={(v) => fmt(v)} />
-                <Bar dataKey="valor" radius={[0, 6, 6, 0]} fill="#D9A441" />
-              </BarChart>
-            </ResponsiveContainer>
+            <SimpleBarChart data={porCategoria.map((p) => ({ ...p, cor: "#D9A441" }))} horizontal />
           </div>
         </section>
       )}
@@ -1510,6 +1533,17 @@ function GlobalStyle() {
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(<App />);
+</script>
+<script>
+  (function () {
+    var src = document.getElementById("app-source").textContent;
+    var output = Babel.transform(src, {
+      presets: [["react", { runtime: "classic" }]],
+    }).code;
+    var script = document.createElement("script");
+    script.text = output;
+    document.body.appendChild(script);
+  })();
 </script>
 </body>
 </html>
